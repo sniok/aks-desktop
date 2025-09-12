@@ -10,7 +10,8 @@ exports.default = async context => {
   let dest = path.join(context.appOutDir, 'resources/app/node_modules');
 
   if (context.electronPlatformName === 'darwin') {
-    dest = path.join(context.appOutDir, 'Headlamp.app/Contents/Resources/app/node_modules');
+    // Downstream: rename macOS app bundle for AKS desktop branding
+    dest = path.join(context.appOutDir, 'AKSDesktop.app/Contents/Resources/app/node_modules');
   }
 
   try {
