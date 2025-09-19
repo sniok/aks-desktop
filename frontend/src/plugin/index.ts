@@ -614,6 +614,11 @@ export async function fetchAndExecutePlugins(
               secrets['runCmd-scriptjs-headlamp_minikubeprerelease/manage-minikube.js'];
           }
 
+          if (isPackage['aks-desktop']) {
+            secretsToReturn['runCmd-az'] = secrets['runCmd-az'];
+            secretsToReturn['runCmd-kubectl'] = secrets['runCmd-kubectl'];
+          }
+
           if (isPackage['@headlamp-k8s/ai-assistant']) {
             secretsToReturn['runCmd-gh'] = secrets['runCmd-gh'];
             secretsToReturn['runCmd-az'] = secrets['runCmd-az'];
@@ -647,28 +652,6 @@ export async function fetchAndExecutePlugins(
               [pluginRunCommand, pluginPath],
             ];
           }
-
-          if (isPackage['@headlamp-k8s/ai-assistant']) {
-            function pluginRunCommand(
-              command: 'gh' | 'az',
-              args: string[],
-              options: {}
-            ): ReturnType<typeof internalRunCommand> {
-              return internalRunCommand(
-                command,
-                args,
-                options,
-                allowedPermissions,
-                pluginDesktopApiSend,
-                pluginDesktopApiReceive
-              );
-            }
-            return [
-              ['pluginRunCommand', 'pluginPath'],
-              [pluginRunCommand, pluginPath],
-            ];
-          }
-
           return [[], []];
         },
         PrivateFunction,
