@@ -222,6 +222,11 @@ export function identifyPackages(
   }
   const pluginPackageNames: Record<string, string[]> = {
     '@headlamp-k8s/minikube': ['@headlamp-k8s/minikube', '@headlamp-k8s/minikubeprerelease'],
+    '@headlamp-k8s/ai-assistant': [
+      '@headlamp-k8s/ai-assistant',
+      '@headlamp-k8s/ai-assistantprerelease',
+    ],
+    'aks-desktop': ['aks-desktop'],
   };
   const isPackage: Record<string, boolean> = {};
   for (const key in pluginPaths) {
