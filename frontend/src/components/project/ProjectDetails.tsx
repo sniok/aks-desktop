@@ -114,9 +114,8 @@ function ProjectOverview({
     throw new Error('Missing ProjectDetailsContext');
   }
   const { setSelectedCategoryName, setSelectedTab } = detailsContext;
-  const additionalOverviewSections = Object.values(
-    useTypedSelector(state => state.projects.overviewSections)
-  );
+  const additionalOverviewSections = useTypedSelector(state => state.projects.overviewSections)
+  
   const [projectSections, setProjectSections] = useState<ProjectOverviewSection[]>([]);
 
   // Load custom sections
@@ -127,7 +126,7 @@ function ProjectOverview({
       // Get a list of enabled sections
       const enabledSections = (
         await Promise.all(
-          additionalOverviewSections.map(section =>
+          Object.values(additionalOverviewSections).map(section =>
             section.isEnabled
               ? section
                   .isEnabled({ project })
