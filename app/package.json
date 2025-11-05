@@ -27,7 +27,7 @@
     "tsc": "tsc"
   },
   "build": {
-    "appId": "com.microsoft.aks-dekstop",
+    "appId": "com.microsoft.aks-desktop",
     "beforeBuild": "./scripts/build-backend.js",
     "afterPack": "./scripts/after-pack.js",
     "asar": false,
@@ -86,8 +86,8 @@
       ]
     },
     "mac": {
-      "appId": "com.microsoft.aks-dekstop",
-      "sign": "./mac/scripts/codeSign.js",
+      "appId": "com.microsoft.aks-desktop",
+      "provisioningProfile": "mac/aks-desktop.provisionprofile",
       "target": [
         {
           "target": "dmg",
@@ -98,9 +98,14 @@
         }
       ],
       "gatekeeperAssess": false,
+      "hardenedRuntime": true,
       "notarize": false,
-      "entitlements": "mac/entitlements.mac.plist",
-      "entitlementsInherit": "mac/entitlements.mac.plist",
+      "type": "distribution",
+      "signIgnore": [
+        "external-tools",
+        ".*\\.pyc$",
+        "__pycache__"
+      ],
       "extraResources": [
         {
           "from": "../backend/headlamp-server"
