@@ -10,7 +10,7 @@ Built on top of open-source Headlamp, AKS desktop provides a guided, self-servic
 Please download the latest release for your platform from the [Releases](https://github.com/Azure/aks-desktop/releases/latest) page.
 
 
-## Getting Started
+## How to Build
 
 To get started with AKS desktop, follow these steps:
 1. Clone the repository:
@@ -25,6 +25,7 @@ To get started with AKS desktop, follow these steps:
 
 3. Install the dependencies:
    ```bash
+   ./scripts/headlamp-submodule.sh --reset
    npm install
    npm run install:all
    ```
