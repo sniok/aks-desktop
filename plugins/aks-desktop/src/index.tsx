@@ -23,7 +23,7 @@ import CreateAKSProject from './components/CreateAKSProject/CreateAKSProject';
 import AKSProjectDeleteButton from './components/DeleteAKSProject/AKSProjectDeleteButton';
 import DeployButton from './components/Deploy/DeployButton';
 import ImportAKSProjects from './components/ImportAKSProjects/ImportAKSProjects';
-import InfoTab from './components/InfoTab';
+import InfoTab from './components/InfoTab/InfoTab';
 import AzureLogo from './components/Logo/Logo';
 import LogsTab from './components/LogsTab/LogsTab';
 import MetricsCard from './components/Metrics/MetricsCard';
