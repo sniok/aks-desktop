@@ -46,6 +46,22 @@ vi.mock('./multiplexer', () => ({
   },
 }));
 
+// Mock the KubeObject module to break the circular dependency chain:
+// useKubeObjectList -> KubeList -> KubeObject -> lib/k8s/index -> clusterRole -> KubeObject (undefined)
+vi.mock('../../KubeObject', () => ({
+  KubeObject: class MockKubeObject {
+    constructor(public jsonData: any) {}
+  },
+}));
+
+// Mock the KubeObject module to break the circular dependency chain:
+// useKubeObjectList -> KubeList -> KubeObject -> lib/k8s/index -> clusterRole -> KubeObject (undefined)
+vi.mock('../../KubeObject', () => ({
+  KubeObject: class MockKubeObject {
+    constructor(public jsonData: any) {}
+  },
+}));
+
 const mockClusterFetch = clusterFetch as MockedFunction<typeof clusterFetch>;
 
 const mockJsonResponse = (data: unknown) =>
