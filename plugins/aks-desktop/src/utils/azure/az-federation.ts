@@ -1,12 +1,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the Apache 2.0.
-// Federated credential CLI functions (GitHub Actions OIDC and K8s service account federation).
+// Federated credential functions (GitHub Actions OIDC and K8s service account federation).
 
+import { ContainerServiceClient } from '@azure/arm-containerservice';
+import { ManagedServiceIdentityClient } from '@azure/arm-msi';
+import { getAzureCredential } from '../../azureCredential';
 import { K8S_DNS_LABEL_PATTERN } from '../kubernetes/k8sNames';
-import { debugLog, isValidGuid, runAzCommand } from './az-cli-core';
+import { debugLog, getErrorMessage, isValidGuid } from './az-helpers';
 import { isValidAzResourceName, isValidGitHubName } from './az-validation';
 
-/** Shared helper: runs `az identity federated-credential create` with dedup handling. */
+/**
+ * Shared helper: creates (or updates) a federated identity credential.
+ * `createOrUpdate` is idempotent, so an already-existing credential is not an error.
+ */
 async function runFederatedCredentialCreate(options: {
   identityName: string;
   resourceGroup: string;
@@ -26,41 +32,23 @@ async function runFederatedCredentialCreate(options: {
     logPrefix,
   } = options;
 
-  const result = await runAzCommand(
-    [
-      'identity',
-      'federated-credential',
-      'create',
-      '--identity-name',
-      identityName,
-      '--resource-group',
+  try {
+    debugLog(logPrefix, credentialName);
+    const client = new ManagedServiceIdentityClient(await getAzureCredential(), subscriptionId);
+    await client.federatedIdentityCredentials.createOrUpdate(
       resourceGroup,
-      '--subscription',
-      subscriptionId,
-      '--name',
+      identityName,
       credentialName,
-      '--issuer',
-      issuer,
-      '--subject',
-      subject,
-      '--audiences',
-      'api://AzureADTokenExchange',
-      '--output',
-      'json',
-    ],
-    logPrefix,
-    `create federated credential (${credentialName})`,
-    undefined,
-    stderr => {
-      if (stderr.includes('FederatedIdentityCredentialAlreadyExists')) {
-        debugLog('Federated credential already exists, continuing.');
-        return { success: true };
+      {
+        issuer,
+        subject,
+        audiences: ['api://AzureADTokenExchange'],
       }
-      return null;
-    }
-  );
-
-  return { success: result.success, error: result.error };
+    );
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: getErrorMessage(error) };
+  }
 }
 
 export async function createFederatedCredential(options: {
@@ -115,64 +103,43 @@ export async function getAksOidcIssuerUrl(options: {
     return { success: false, error: 'Invalid cluster name or resource group format' };
   }
 
-  const query =
-    '{issuerUrl: oidcIssuerProfile.issuerUrl, workloadIdentityEnabled: securityProfile.workloadIdentity.enabled}';
-
-  const result = await runAzCommand(
-    [
-      'aks',
-      'show',
-      '--name',
-      clusterName,
-      '--resource-group',
-      resourceGroup,
-      '--subscription',
-      subscriptionId,
-      '--query',
-      query,
-      '-o',
-      'json',
-    ],
-    'Getting AKS OIDC issuer URL and workload identity status:',
-    'get AKS OIDC issuer URL',
-    stdout => {
-      let parsed;
-      try {
-        parsed = JSON.parse(stdout.trim());
-      } catch (e) {
-        throw new Error(
-          `Unexpected output from AKS OIDC issuer query: ${e instanceof Error ? e.message : e}`
-        );
-      }
-      const issuerUrl = parsed.issuerUrl;
-      const workloadIdentityEnabled = parsed.workloadIdentityEnabled;
-
-      if (!issuerUrl && !workloadIdentityEnabled) {
-        throw new Error(
-          'Cluster does not have OIDC issuer or workload identity enabled. Enable both with: az aks update --name <cluster> --resource-group <rg> --enable-oidc-issuer --enable-workload-identity'
-        );
-      }
-
-      if (!issuerUrl) {
-        throw new Error(
-          'Cluster does not have OIDC issuer enabled. Enable it with: az aks update --name <cluster> --resource-group <rg> --enable-oidc-issuer'
-        );
-      }
-
-      if (!workloadIdentityEnabled) {
-        throw new Error(
-          'Cluster does not have workload identity enabled. Enable it with: az aks update --name <cluster> --resource-group <rg> --enable-workload-identity'
-        );
-      }
-
-      return issuerUrl as string;
-    }
-  );
-
-  if (!result.success) {
-    return { success: false, error: result.error };
+  let issuerUrl: string | undefined;
+  let workloadIdentityEnabled: boolean | undefined;
+  try {
+    debugLog('Getting AKS OIDC issuer URL and workload identity status:', clusterName);
+    const client = new ContainerServiceClient(await getAzureCredential(), subscriptionId);
+    const cluster = await client.managedClusters.get(resourceGroup, clusterName);
+    issuerUrl = cluster.oidcIssuerProfile?.issuerURL;
+    workloadIdentityEnabled = cluster.securityProfile?.workloadIdentity?.enabled;
+  } catch (error) {
+    return { success: false, error: getErrorMessage(error) };
   }
-  return { success: true, issuerUrl: result.data };
+
+  if (!issuerUrl && !workloadIdentityEnabled) {
+    return {
+      success: false,
+      error:
+        'Cluster does not have OIDC issuer or workload identity enabled. Enable both with: az aks update --name <cluster> --resource-group <rg> --enable-oidc-issuer --enable-workload-identity',
+    };
+  }
+
+  if (!issuerUrl) {
+    return {
+      success: false,
+      error:
+        'Cluster does not have OIDC issuer enabled. Enable it with: az aks update --name <cluster> --resource-group <rg> --enable-oidc-issuer',
+    };
+  }
+
+  if (!workloadIdentityEnabled) {
+    return {
+      success: false,
+      error:
+        'Cluster does not have workload identity enabled. Enable it with: az aks update --name <cluster> --resource-group <rg> --enable-workload-identity',
+    };
+  }
+
+  return { success: true, issuerUrl };
 }
 
 /** Simple 32-bit hash for generating short deterministic suffixes. */

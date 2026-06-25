@@ -49,7 +49,7 @@ jobs:
             changed_plugins=$(printf '%s\n' "$changed_files" | grep '^plugins/' | awk -F/ '{print $2}' | sort -u)
           fi
 
-          TRANSLATION_PLUGINS=(aks-desktop ai-assistant)
+          TRANSLATION_PLUGINS=(aks-desktop azure-aks ai-assistant)
           plugin_dirs=()
           has_translation_plugins=false
 

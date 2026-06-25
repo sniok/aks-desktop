@@ -23,6 +23,12 @@
     "plugin:test:all": "cd plugins/aks-desktop && npm run test:all",
     "plugin:format": "cd plugins/aks-desktop && npm run format",
     "plugin:package": "cd plugins/aks-desktop && npm run package",
+    "azure-aks:install": "cd plugins/azure-aks && npm install",
+    "azure-aks:build": "cd plugins/azure-aks && npm run build",
+    "azure-aks:start": "cd plugins/azure-aks && npm start",
+    "azure-aks:test": "cd plugins/azure-aks && npm test",
+    "azure-aks:lint": "cd plugins/azure-aks && npm run lint",
+    "azure-aks:format": "cd plugins/azure-aks && npm run format",
     "ai-assistant:install": "cd plugins/ai-assistant && npm install",
     "ai-assistant:build": "cd plugins/ai-assistant && npm run build",
     "ai-assistant:start": "cd plugins/ai-assistant && npm start",
@@ -31,9 +37,9 @@
     "ai-assistant:format": "cd plugins/ai-assistant && npm run format",
     "headlamp:install": "cd headlamp/frontend && npm install && cd ../app && npm install",
     "headlamp:build": "cd headlamp && make backend && make frontend",
-    "install:all": "npm run headlamp:install && npm run plugin:install && npm run ai-assistant:install",
-    "build:all": "npm run headlamp:build && npm run plugin:build && npm run ai-assistant:build",
-    "dev": "concurrently --kill-others --names \"PLUGIN,AI-ASSISTANT,BACKEND,FRONTEND,APP\" -c \"cyan,blue,green,yellow,magenta\" \"npm run plugin:start\" \"npm run ai-assistant:start\" \"cd headlamp && make run-backend\" \"cd headlamp && make run-frontend\" \"cd headlamp && make run-only-app\"",
+    "install:all": "npm run headlamp:install && npm run azure-aks:install && npm run plugin:install && npm run ai-assistant:install",
+    "build:all": "npm run headlamp:build && npm run azure-aks:build && npm run plugin:build && npm run ai-assistant:build",
+    "dev": "concurrently --kill-others --names \"AZURE-AKS,PLUGIN,AI-ASSISTANT,BACKEND,FRONTEND,APP\" -c \"blueBright,cyan,blue,green,yellow,magenta\" \"npm run azure-aks:start\" \"npm run plugin:start\" \"npm run ai-assistant:start\" \"cd headlamp && make run-backend\" \"cd headlamp && make run-frontend\" \"cd headlamp && make run-only-app\"",
     "prepare": "husky",
     "knip": "knip",
     "i18n:collect": "node Localize/translation-manager.mjs collect",
@@ -85,6 +91,12 @@
     ],
     "plugins/ai-assistant/**/*.{js,jsx,ts,tsx,json,css,scss,md}": [
       "node .husky/format-ai-assistant.js"
+    ],
+    "plugins/azure-aks/**/*.{js,jsx,ts,tsx}": [
+      "npm --prefix plugins/azure-aks run lint"
+    ],
+    "plugins/azure-aks/**/*.{js,jsx,ts,tsx,json,css,scss,md}": [
+      "npm --prefix plugins/azure-aks run format"
     ]
   },
   "repository": {

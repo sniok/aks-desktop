@@ -1,6 +1,16 @@
 # Azure Utilities (`utils/azure/`)
 
-This directory contains the Azure CLI integration layer for AKS Desktop. Every Azure operation — authentication, cluster management, namespace CRUD, identity setup — flows through these modules.
+This directory contains the Azure SDK integration layer for AKS Desktop. Every
+Azure operation for workload features flows through these modules. Operations are performed programmatically
+with the Azure SDK clients, not by shelling out to the `az` CLI.
+
+## Authentication
+
+All authentication lives in `../../azureCredential.tsx`, the single source of
+truth. It exports an SDK-compatible `azureCredential` (`{ getToken(scopes) }`)
+plus `getLoginStatus()`, `initiateLogin()`, and `logout()`. The credential is
+passed into every SDK client constructor. For raw bearer tokens (kubeconfig,
+Prometheus, Microsoft Graph) call `azureCredential.getToken(scope)`.
 
 ## Module Map
 
@@ -8,105 +18,89 @@ This directory contains the Azure CLI integration layer for AKS Desktop. Every A
 
 | Module             | Responsibility                                                                                                    |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------- |
-| `az-cli-path.ts`   | Resolve the `az` command path (bundled Electron build vs system CLI)                                              |
-| `az-cli-core.ts`   | Foundation — `runCommandAsync`, `runAzCommand`, debug logging, error detection (`needsRelogin`, `isAzError`)      |
+| `clients.ts`       | SDK client factories, each bound to `azureCredential` (Resource Graph, Container Service, Authorization, MSI, Container Registry, Features, Resources) |
+| `az-helpers.ts`    | Shared pure helpers: `debugLog`, `isValidGuid`, `getErrorMessage`                                                  |
 | `az-validation.ts` | Input validation (`isValidAzResourceName`, `isValidGitHubName`) and output parsing (`parseManagedIdentityOutput`) |
 
 ### Domain Modules
 
-| Module                   | Responsibility                                                                           |
-| ------------------------ | ---------------------------------------------------------------------------------------- |
-| `az-auth.ts`             | Login flows, status checks, access tokens                                                |
-| `az-extensions.ts`       | Extension install/check, feature registration (ManagedNamespacePreview), CLI config      |
-| `az-subscriptions.ts`    | Subscriptions, tenants, resource groups, locations, VM sizes                             |
-| `az-clusters.ts`         | AKS cluster listing (Resource Graph optimized), status, capabilities, kubeconfig, addons |
-| `az-resource-graph.ts`   | Azure Resource Graph queries for fast cluster lookups                                    |
-| `az-namespaces.ts`       | Managed namespace CRUD with polling for async operations                                 |
-| `az-namespace-access.ts` | Namespace role assignments and access verification                                       |
-| `az-identity.ts`         | Managed identity CRUD, role assignments, scope building                                  |
-| `az-ad.ts`               | Azure AD user search                                                                     |
-| `az-acr.ts`              | Container registry creation, listing, and image discovery                                |
-| `az-federation.ts`       | Federated credentials for GitHub Actions and Kubernetes OIDC                             |
+| Module                   | SDK client(s)                                              | Responsibility                                                                |
+| ------------------------ | --------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `az-subscriptions.ts`    | `SubscriptionClient`, `ResourceManagementClient`          | Subscriptions, tenants, resource groups, locations, VM sizes                  |
+| `az-resource-graph.ts`   | `ResourceGraphClient`                                      | Azure Resource Graph queries for fast cross-subscription lookups              |
+| `az-clusters.ts`         | `ResourceGraphClient`, `ContainerServiceClient`           | AKS cluster listing, status, capabilities, kubeconfig, addons                 |
+| `az-identity.ts`         | `ManagedServiceIdentityClient`, `AuthorizationManagementClient` | Managed identity CRUD, role assignments, scope building                  |
+| `az-acr.ts`              | `ContainerRegistryManagementClient`, `ContainerRegistryClient` | Container registry creation, listing, and image discovery                |
+| `az-federation.ts`       | `ManagedServiceIdentityClient`, `ContainerServiceClient` | Federated credentials for GitHub Actions and Kubernetes OIDC                  |
 
 ### Orchestration Modules
 
-These modules compose the `az-*` primitives into higher-level workflows used by UI components:
+These modules compose the domain primitives into higher-level workflows used by
+UI components:
 
 | Module                 | Responsibility                                                           |
 | ---------------------- | ------------------------------------------------------------------------ |
-| `aks.ts`               | Legacy cluster registration flow (subscriptions + clusters + kubeconfig) |
-| `checkAzureCli.ts`     | Pre-flight check: is CLI installed + is aks-preview extension present?   |
+| `aks.ts`               | Cluster registration flow (kubeconfig credentials + Headlamp `setCluster`) |
 | `identitySetup.ts`     | Ensure resource group + managed identity exist (create-if-missing)       |
 | `identityRoles.ts`     | Compute required role assignments for a given namespace context          |
 | `identityWithRoles.ts` | End-to-end: ensure identity exists with all required roles               |
-| `roleAssignment.ts`    | Assign roles to a namespace (used by CreateNamespace flow)               |
 
-## Dependency Diagram
+## SDK Client Factories (`clients.ts`)
 
-```
-az-cli-path.ts  (standalone — CLI path resolution)
-    ^
-az-cli-core.ts  (foundation — runCommandAsync, runAzCommand, error helpers)
-    ^
-    ├── az-auth.ts ──────────────────> az-cli-path.ts
-    ├── az-extensions.ts
-    ├── az-subscriptions.ts ─────────> az-validation.ts
-    ├── az-resource-graph.ts
-    ├── az-namespaces.ts
-    ├── az-namespace-access.ts ──────> az-namespaces.ts
-    ├── az-clusters.ts ──────────────> az-resource-graph.ts, az-subscriptions.ts
-    ├── az-identity.ts ──────────────> az-validation.ts
-    ├── az-ad.ts
-    ├── az-acr.ts ───────────────────> az-validation.ts
-    └── az-federation.ts ────────────> az-validation.ts
+Every client is constructed via a factory bound to `azureCredential`:
 
-az-validation.ts  (standalone — no internal imports)
+```typescript
+import { containerServiceClient, resourceGraphClient } from './clients';
+
+const clusters = containerServiceClient(subscriptionId);
+const graph = resourceGraphClient();
 ```
 
-No circular dependencies. `az-cli-core.ts` is the single hub — every domain module imports from it.
+Read-heavy, cross-subscription queries use `ResourceGraphClient`. Resource CRUD
+uses the per-service management clients (`ContainerServiceClient`,
+`AuthorizationManagementClient`, etc.), each scoped to a `subscriptionId`.
 
 ## Adding a New Function
 
-1. **Find the right module.** Match the Azure resource type: subscriptions go in `az-subscriptions.ts`, cluster operations in `az-clusters.ts`, etc.
-2. **Create a new module** only when the function targets a new Azure resource domain (e.g., `az-dns.ts` for DNS zones). Prefix with `az-` and import from `az-cli-core.ts`.
-3. **Use `runAzCommand`** for typed JSON responses with automatic error handling. Use `runCommandAsync` when you need raw stdout/stderr control.
-4. **Validate inputs** with `isValidGuid` (from `az-cli-core`) or helpers from `az-validation.ts` before interpolating values into KQL queries, OData `--filter` expressions, or JMESPath `--query` strings — this prevents query injection. (CLI args are passed as arrays via `pluginRunCommand`, so shell injection is not a concern.)
+1. **Find the right module.** Match the Azure resource type: subscriptions go in
+   `az-subscriptions.ts`, cluster operations in `az-clusters.ts`, etc.
+2. **Create a new module** only when the function targets a new Azure resource
+   domain (e.g., `az-dns.ts` for DNS zones). Prefix with `az-`.
+3. **Get a client from `clients.ts`** (add a new factory there if the SDK client
+   is not yet exposed). Never construct clients inline; always bind through the
+   shared `azureCredential`.
+4. **Validate inputs** with `isValidGuid` (from `az-helpers.ts`) or helpers from
+   `az-validation.ts` before interpolating values into KQL Resource Graph
+   queries or OData filters -- this prevents query injection.
+5. **Wrap SDK calls in try/catch** and map errors to the module's result shape
+   using `getErrorMessage(error)`.
 
 ## Return Type Conventions
 
 **Operations that can fail gracefully:**
 
 ```typescript
-{ success: boolean; error?: string }
+{ success: boolean; data?: T; error?: string }
 ```
 
-**Operations returning raw CLI output:**
+**Operations returning only a status:**
 
 ```typescript
-{
-  stdout: string;
-  stderr: string;
-}
+{ success: boolean; message?: string }
 ```
 
-Returned by `runCommandAsync`. Callers check `stderr` for errors.
-
-**Operations returning data with status:**
-
-```typescript
-{ success: boolean; stdout: string; stderr: string; error?: string }
-```
-
-Used by domain functions (e.g., `az-extensions.ts`, `az-namespaces.ts`) that need to expose both the success flag and raw CLI output.
-
-**`runAzCommand<T>`** — runs an `az` CLI command and returns `{ success: boolean; data?: T; error?: string }`. Does **not** throw on CLI errors — returns `success: false` with an `error` message instead. JSON parsing is not automatic; callers pass an optional `parseOutput` function (commonly `JSON.parse`) to convert stdout into `T`. Handles `needsRelogin` detection internally.
-
-**`runCommandAsync`** — always resolves (never throws). Returns `{ stdout, stderr }`. Callers must check stderr.
+These shapes are preserved from the previous CLI implementation so consumers did
+not need to change.
 
 ## Error Handling
 
-- **`runCommandAsync`** uses Headlamp's `pluginRunCommand` bridge under the hood and always resolves. Check `stderr` for errors.
-- **`runAzCommand`** builds on `runCommandAsync` and adds optional JSON parsing via a caller-provided `parseOutput` function, plus `needsRelogin` detection and `isAzError` checking. It never throws on CLI errors; instead it returns `{ success: false, error }`.
-- **`needsRelogin(stderr)`** — returns `true` when the error indicates an expired/invalid token. UI components use this to redirect to the login page.
-- **`isAzError(stderr)`** — returns `true` when stderr includes the Azure CLI `ERROR:` prefix. Other stderr output (warnings, informational messages) does not trigger this check.
-- **`isValidGuid(value)`** — validates subscription/tenant IDs before interpolating into KQL queries or other string-based query contexts to prevent query injection.
+- SDK clients throw on failure (the Azure SDK raises `RestError`). Wrap calls in
+  `try/catch` and convert to the module result shape.
+- **`getErrorMessage(error)`** (from `az-helpers.ts`) -- normalizes an unknown
+  thrown value into a string message (`error instanceof Error ? error.message :
+  'Unknown error'`).
+- **`isValidGuid(value)`** -- validates subscription/tenant IDs before
+  interpolating into KQL queries or other string-based query contexts to prevent
+  query injection.
+- Token expiry / re-login is handled centrally by `azureCredential`; modules do
+  not implement their own re-login detection.

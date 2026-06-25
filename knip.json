@@ -19,6 +19,30 @@
         "build/download-az-cli.ts"
       ]
     },
+    "plugins/azure-aks": {
+      "entry": [
+        "src/index.tsx",
+        "src/**/*.stories.tsx",
+        "src/**/*.test.{ts,tsx}"
+      ],
+      "project": [
+        "src/**/*.{ts,tsx}"
+      ],
+      "ignore": [
+        "dist/**",
+        "src/**/*.d.ts"
+      ],
+      "ignoreDependencies": [
+        "@iconify/react",
+        "@mui/material",
+        "eslint-plugin-no-barrel-files",
+        "react-router-dom"
+      ],
+      "ignoreBinaries": [
+        "esbuild",
+        "prettier"
+      ]
+    },
     "plugins/aks-desktop": {
       "entry": [
         "src/index.tsx"

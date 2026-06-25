@@ -6,7 +6,8 @@ Navigation guide for AI coding agents. For Headlamp plugin API examples see [`pl
 
 | Layer | Path | Purpose | When to change |
 | --- | --- | --- | --- |
-| **Plugin** | `plugins/aks-desktop/` | AKS-specific UI, Azure integration, Kubernetes operations | Most changes go here |
+| **Azure AKS plugin** | `plugins/azure-aks/` | Azure authentication, AKS cluster registration, project namespace creation, managed namespaces, and application deployment | Azure and AKS project integration |
+| **Plugin** | `plugins/aks-desktop/` | AKS Desktop shell, telemetry, observability, and GitHub pipelines | App-wide and pipeline features |
 | **Build** | `build/` | Plugin setup, external tool bundling (Azure CLI, Python), post-build verification | Packaging, bundled tool versions, installer behavior |
 | **Headlamp fork** | `headlamp/` (submodule) | Electron shell, backend server, frontend framework | Only when plugin system cannot achieve the goal |
 
@@ -21,8 +22,10 @@ See [`MAINTENANCE.md`](./MAINTENANCE.md) for the full fork rebase workflow.
 
 | Change type | Location |
 | --- | --- |
-| Azure CLI operations | `plugins/aks-desktop/src/utils/azure/<domain-module>.ts` (e.g., `az-acr.ts`, `az-identity.ts`, `aks.ts`) |
-| Kubernetes operations | `plugins/aks-desktop/src/utils/kubernetes/` |
+| Azure authentication, login, profile, cluster registration, regular or managed project namespaces, or application deployment | `plugins/azure-aks/` |
+| Azure operations for project namespace and deployment features | `plugins/azure-aks/src/utils/azure/<domain-module>.ts` |
+| Kubernetes operations for project namespace and deployment features | `plugins/azure-aks/src/utils/kubernetes/` |
+| Azure and Kubernetes operations for GitHub pipelines | `plugins/aks-desktop/src/utils/` |
 | GitHub integration | `plugins/aks-desktop/src/utils/github/` |
 | New UI feature | `plugins/aks-desktop/src/components/<FeatureName>/` |
 | Shared hooks | `plugins/aks-desktop/src/hooks/` |

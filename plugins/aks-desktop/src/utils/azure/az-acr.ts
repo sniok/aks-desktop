@@ -1,8 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the Apache 2.0.
-// Azure Container Registry CLI functions.
+// Azure Container Registry functions (management plane + data plane).
 
-import { debugLog, isValidGuid, needsRelogin, runAzCommand, runCommandAsync } from './az-cli-core';
+import { ContainerRegistryManagementClient } from '@azure/arm-containerregistry';
+import { ContainerRegistryClient } from '@azure/container-registry';
+import { getAzureCredential } from '../../azureCredential';
+import { debugLog, getErrorMessage, isValidGuid } from './az-helpers';
 import { isValidAzResourceName } from './az-validation';
 
 /** Azure Container Registry name: 5-50 lowercase alphanumeric characters. */
@@ -27,59 +30,30 @@ export async function createContainerRegistry(options: {
     return { success: false, error: 'Invalid subscription ID format' };
   }
   if (!ACR_NAME_PATTERN.test(registryName)) {
-    return {
-      success: false,
-      error: `Invalid registry name: ${ACR_NAME_ERROR}`,
-    };
+    return { success: false, error: `Invalid registry name: ${ACR_NAME_ERROR}` };
   }
   if (!isValidAzResourceName(resourceGroup)) {
     return { success: false, error: 'Invalid resource group name format' };
   }
 
-  const result = await runAzCommand(
-    [
-      'acr',
-      'create',
-      '--name',
-      registryName,
-      '--resource-group',
-      resourceGroup,
-      '--sku',
-      sku,
-      '--location',
+  try {
+    debugLog('Creating container registry:', registryName);
+    const client = new ContainerRegistryManagementClient(
+      await getAzureCredential(),
+      subscriptionId
+    );
+    const registry = await client.registries.beginCreateAndWait(resourceGroup, registryName, {
       location,
-      '--subscription',
-      subscriptionId,
-      '--output',
-      'json',
-    ],
-    'Creating container registry:',
-    'create container registry',
-    (stdout: string) => {
-      let parsed;
-      try {
-        parsed = JSON.parse(stdout);
-      } catch (e) {
-        throw new Error(
-          `Unexpected output from ACR create command: ${e instanceof Error ? e.message : e}`
-        );
-      }
-      return {
-        id: parsed.id as string,
-        loginServer: parsed.loginServer as string,
-      };
-    }
-  );
-
-  if (!result.success) {
-    return { success: false, error: result.error };
+      sku: { name: sku },
+    });
+    return {
+      success: true,
+      id: registry.id,
+      loginServer: registry.loginServer,
+    };
+  } catch (error) {
+    return { success: false, error: getErrorMessage(error) };
   }
-
-  return {
-    success: true,
-    id: result.data?.id,
-    loginServer: result.data?.loginServer,
-  };
 }
 
 // Azure Container Registry functions (moved from az-cli.ts)
@@ -94,34 +68,41 @@ export interface AcrInfo {
   sku: AcrSku;
 }
 
+/** Extracts the resource group name from an Azure resource ID. */
+function resourceGroupFromId(id?: string): string {
+  if (!id) {
+    return '';
+  }
+  const match = /\/resourceGroups\/([^/]+)/i.exec(id);
+  return match?.[1] ?? '';
+}
+
 export async function getContainerRegistries(subscriptionId: string): Promise<AcrInfo[]> {
   if (!isValidGuid(subscriptionId)) {
     throw new Error('Invalid subscription ID format');
   }
 
-  const result = await runAzCommand<AcrInfo[]>(
-    ['acr', 'list', '--subscription', subscriptionId, '--output', 'json'],
-    'Listing container registries:',
-    'list container registries',
-    (stdout: string) => {
-      const registries = JSON.parse(stdout || '[]') as any[];
-      return registries.map(
-        (r): AcrInfo => ({
-          id: r.id,
-          name: r.name,
-          resourceGroup: r.resourceGroup,
-          loginServer: r.loginServer,
-          location: r.location,
-          sku: r.sku?.name ?? r.sku ?? 'Basic',
-        })
-      );
+  try {
+    debugLog('Listing container registries:', subscriptionId);
+    const client = new ContainerRegistryManagementClient(
+      await getAzureCredential(),
+      subscriptionId
+    );
+    const registries: AcrInfo[] = [];
+    for await (const r of client.registries.list()) {
+      registries.push({
+        id: r.id as string,
+        name: r.name as string,
+        resourceGroup: resourceGroupFromId(r.id),
+        loginServer: r.loginServer as string,
+        location: r.location as string,
+        sku: (r.sku?.name as AcrSku) ?? 'Basic',
+      });
     }
-  );
-
-  if (!result.success) {
-    throw new Error(result.error ?? 'Failed to get container registries');
+    return registries;
+  } catch (error) {
+    throw new Error(getErrorMessage(error) ?? 'Failed to get container registries');
   }
-  return result.data!;
 }
 
 export async function getContainerImages(
@@ -131,20 +112,19 @@ export async function getContainerImages(
   let allImages: any[] = [];
 
   if (registryName) {
-    // Get images from specific registry
-    const images = await getImagesFromRegistry(subscriptionId, registryName);
+    const images = await getImagesFromRegistry(registryName);
     allImages = allImages.concat(images);
   } else {
-    // Get all registries first, then get images from each
+    // Get all registries first, then get images from each.
     const registries = await getContainerRegistries(subscriptionId);
 
     for (const registry of registries) {
       try {
-        const images = await getImagesFromRegistry(subscriptionId, registry.name);
+        const images = await getImagesFromRegistry(registry.name, registry.loginServer);
         allImages = allImages.concat(images);
       } catch (error) {
         console.warn(`Failed to get images from registry ${registry.name}:`, error);
-        // Continue with other registries
+        // Continue with other registries.
       }
     }
   }
@@ -152,95 +132,70 @@ export async function getContainerImages(
   return allImages;
 }
 
-async function getImagesFromRegistry(subscriptionId: string, registryName: string): Promise<any[]> {
-  // First get list of repositories
-  const { stdout: repoStdout, stderr: repoStderr } = await runCommandAsync('az', [
-    'acr',
-    'repository',
-    'list',
-    '--name',
-    registryName,
-    '--subscription',
-    subscriptionId,
-    '--output',
-    'json',
-  ]);
+/**
+ * Lists repositories and their recent tags from a single registry via the ACR
+ * data-plane API. The `ContainerRegistryClient` performs the ACR token exchange
+ * internally using `azureCredential`. Returns an empty list on auth/404 errors
+ * so callers can degrade gracefully, matching prior CLI behavior.
+ */
+async function getImagesFromRegistry(registryName: string, loginServer?: string): Promise<any[]> {
+  const endpoint = `https://${loginServer ?? `${registryName}.azurecr.io`}`;
+  const client = new ContainerRegistryClient(endpoint, await getAzureCredential());
 
-  if (repoStderr && needsRelogin(repoStderr)) {
-    throw new Error('Authentication required. Please log in to Azure CLI: az login');
-  }
+  const MAX_REPOSITORIES = 10; // Limit to first 10 repositories for performance.
+  const MAX_IMAGES_TOTAL = 50; // Stop after collecting 50 images total.
+  const MAX_TAGS_PER_REPO = 5; // Most recent tags per repository.
 
-  if (repoStderr && (repoStderr.includes('ERROR') || repoStderr.includes('error'))) {
-    console.error(`Failed to get repositories from ${registryName}:`, repoStderr);
-    return [];
-  }
-
-  let repositories: string[] = [];
+  const repositories: string[] = [];
   try {
-    repositories = JSON.parse(repoStdout || '[]');
+    for await (const name of client.listRepositoryNames()) {
+      repositories.push(name);
+      if (repositories.length >= MAX_REPOSITORIES) {
+        break;
+      }
+    }
   } catch (error) {
-    console.error('Failed to parse repositories response:', error);
+    console.error(`Failed to get repositories from ${registryName}:`, error);
     return [];
   }
 
   const allImages: any[] = [];
-  const MAX_REPOSITORIES = 10; // Limit to first 10 repositories for performance
-  const MAX_IMAGES_TOTAL = 50; // Stop after collecting 50 images total
 
-  // Limit repositories for performance
-  const limitedRepositories = repositories.slice(0, MAX_REPOSITORIES);
+  for (const repository of repositories) {
+    if (allImages.length >= MAX_IMAGES_TOTAL) {
+      debugLog(`Limiting results to ${MAX_IMAGES_TOTAL} images for performance`);
+      break;
+    }
 
-  // Get images from each repository
-  for (const repository of limitedRepositories) {
     try {
-      // Early termination if we have enough images
-      if (allImages.length >= MAX_IMAGES_TOTAL) {
-        debugLog(`Limiting results to ${MAX_IMAGES_TOTAL} images for performance`);
-        break;
-      }
+      const repo = client.getRepository(repository);
+      let tagCount = 0;
 
-      const { stdout: tagStdout, stderr: tagStderr } = await runCommandAsync('az', [
-        'acr',
-        'repository',
-        'show-tags',
-        '--name',
-        registryName,
-        '--repository',
-        repository,
-        '--subscription',
-        subscriptionId,
-        '--output',
-        'json',
-        '--orderby',
-        'time_desc',
-        '--top',
-        '5', // Reduced to 5 most recent tags per repository for performance
-      ]);
+      for await (const manifest of repo.listManifestProperties({
+        order: 'LastUpdatedOnDescending',
+      })) {
+        for (const tag of manifest.tags ?? []) {
+          allImages.push({
+            id: `${registryName}/${repository}:${tag}`,
+            name: repository.split('/').pop() || repository,
+            repository,
+            tag,
+            registry: `${registryName}.azurecr.io`,
+            registryName,
+            createdTime: manifest.createdOn.toISOString().split('T')[0],
+            size:
+              manifest.sizeInBytes !== null && manifest.sizeInBytes !== undefined
+                ? String(manifest.sizeInBytes)
+                : 'Unknown',
+            digest: manifest.digest ?? '',
+          });
 
-      if (tagStderr && tagStderr.includes('ERROR')) {
-        console.warn(`Failed to get tags for ${repository}:`, tagStderr);
-        continue;
-      }
-
-      const tags = JSON.parse(tagStdout || '[]');
-
-      for (const tag of tags) {
-        // Skip expensive manifest call for better performance
-        // Use basic info only - users can see size/details after deployment
-        allImages.push({
-          id: `${registryName}/${repository}:${tag}`,
-          name: repository.split('/').pop() || repository,
-          repository,
-          tag,
-          registry: `${registryName}.azurecr.io`,
-          registryName,
-          createdTime: new Date().toISOString().split('T')[0], // Use current date as fallback
-          size: 'Unknown', // Skip size lookup for performance
-          digest: '',
-        });
-
-        // Early termination check within tag loop
-        if (allImages.length >= MAX_IMAGES_TOTAL) {
+          tagCount += 1;
+          if (tagCount >= MAX_TAGS_PER_REPO || allImages.length >= MAX_IMAGES_TOTAL) {
+            break;
+          }
+        }
+        if (tagCount >= MAX_TAGS_PER_REPO || allImages.length >= MAX_IMAGES_TOTAL) {
           break;
         }
       }
