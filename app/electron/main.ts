@@ -1518,6 +1518,8 @@ async function startElectron() {
   console.info('App starting...');
   // add run cmd consent for aks-desktop to avoid consent dialogs for the aks-desktop plugin
   addRunCmdConsent({ name: 'aks-desktop' });
+  // add run cmd consent for azure-aks to avoid consent dialogs for the azure-aks plugin
+  addRunCmdConsent({ name: 'azure-aks' });
   addRunCmdConsent({ name: 'ai-assistant' });
 
   // Increase max listeners to prevent false positive warnings

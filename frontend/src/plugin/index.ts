@@ -625,6 +625,11 @@ export async function fetchAndExecutePlugins(
             secretsToReturn['runCmd-kubectl'] = secrets['runCmd-kubectl'];
           }
 
+          if (isPackage['azure-aks']) {
+            secretsToReturn['runCmd-scriptjs-azure-aks/azure-api.js'] =
+              secrets['runCmd-scriptjs-azure-aks/azure-api.js'];
+          }
+
           if (isPackage['ai-assistant']) {
             secretsToReturn['runCmd-gh'] = secrets['runCmd-gh'];
             secretsToReturn['runCmd-az'] = secrets['runCmd-az'];
@@ -688,6 +693,27 @@ export async function fetchAndExecutePlugins(
           if (isPackage['aks-desktop']) {
             function pluginRunCommand(
               command: 'az' | 'kubectl' | 'kubelogin',
+              args: string[],
+              options: {}
+            ): ReturnType<typeof internalRunCommand> {
+              return internalRunCommand(
+                command,
+                args,
+                options,
+                allowedPermissions,
+                pluginDesktopApiSend,
+                pluginDesktopApiReceive
+              );
+            }
+            return [
+              ['pluginRunCommand', 'pluginPath'],
+              [pluginRunCommand, pluginPath],
+            ];
+          }
+
+          if (isPackage['azure-aks']) {
+            function pluginRunCommand(
+              command: 'scriptjs',
               args: string[],
               options: {}
             ): ReturnType<typeof internalRunCommand> {
